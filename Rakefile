@@ -12,11 +12,9 @@ GEM_REPOS = %w(
   CocoaPods
   cocoapods-acknowledgements
   cocoapods-deintegrate
-  cocoapods-docs
   cocoapods-downloader
   cocoapods-plugins
   cocoapods-search
-  cocoapods-stats
   cocoapods-trunk
   cocoapods-try
   Core
@@ -175,7 +173,7 @@ begin
 
     title 'Fetching open issues'
     GEM_REPOS.dup.push('Rainforest').each do |name|
-      url = "https://api.github.com/repos/CocoaPods/#{name}/issues?state=open&per_page=100&#{github_access_token_query}"
+      url = "https://api.github.com/repos/CocoaPods/#{name}/issues?state=open&per_page=100"
       response = open(url).read
       issues = JSON.parse(response)
 
@@ -477,7 +475,7 @@ begin
 
       subtitle "Updating the gem version constant"
       version_constant_pattern = /(VERSION = (['"]))#{Gem::Version::VERSION_PATTERN}\2/
-      unless version_file = Pathname.glob("lib/**/{gem_version,#{name},cocoapods_plugin}.rb").
+      unless version_file = Pathname.glob("lib/**/{gem_version,#{name},cocoapods_plugin,version}.rb").
                                      find { |f| File.read(f) =~ version_constant_pattern }
         error "Unable to find a file to bump the version constant in"
       end
@@ -562,14 +560,9 @@ begin
       confirm!("You are about to release `#{gem_version}`, is that correct?")
     end
 
-    if github_access_token
-      gem 'nap'
-      require 'rest'
-      require 'json'
-    else
-      error 'You have not provided a github access token via `.github_access_token`, ' \
-       'so a GitHub release cannot be made automatically.'
-    end
+    gem 'nap'
+    require 'rest'
+    require 'json'
 
     Dir.chdir(gem_dir) do
       subtitle 'Updating the repo'
@@ -623,11 +616,9 @@ begin
       puts yellow("\n[!] Please follow up and ensure that #{stable_branch} is merged into master!\n") unless current_branch == 'master'
     end
 
-    if github_access_token
-      subtitle 'Making GitHub release'
-      make_github_release(gem_dir, gem_version, gem_version.to_s, github_access_token)
-      `open https://github.com/CocoaPods/#{gem_dir}/releases/#{gem_version}`
-    end
+    subtitle 'Making GitHub release'
+    make_github_release(gem_dir, gem_version, gem_version.to_s)
+    `open https://github.com/CocoaPods/#{gem_dir}/releases/#{gem_version}`
 
     `open https://rubygems.org/gems/#{gem_name}`
   end
@@ -710,7 +701,7 @@ def fetch_repos
   url = "https://api.github.com/orgs/CocoaPods/repos?type=public"
   repos = []
   loop do
-    file = OpenURI.open_uri(url, { 'Authorization: token' => github_access_token_query })
+    file = OpenURI.open_uri(url)
     response = file.read
     repos.concat(JSON.parse(response))
 
@@ -734,7 +725,7 @@ end
 #
 # @return [void]
 #
-def clone_repos(repos, shallow=true)
+def clone_repos(repos, shallow=false)
   repos.each do |repo|
     name = repo['name']
     subtitle "Cloning #{name}"
@@ -858,23 +849,12 @@ def default_branch
   common.first if common.count == 1
 end
 
-def make_github_release(repo, version, tag, access_token)
+def make_github_release(repo, version, tag)
   body = changelog_for_repo(repo, version)
 
-  REST.post("https://api.github.com/repos/CocoaPods/#{repo}/releases?access_token=#{access_token}",
-            {
-              :tag_name => tag,
-              :name => version.to_s,
-              :body => body,
-              :prerelease => version.prerelease?,
-            }.to_json,
-            {
-              'Content-Type' => 'application/json',
-              'User-Agent' => 'runscope/0.1,segiddins',
-              'Accept' => '*/*',
-              'Accept-Encoding' => 'gzip, deflate',
-            },
-           )
+  Dir.chdir(repo) do
+    `gh release create '#{version}' --notes '#{body}'`
+  end
 end
 
 def changelog_for_repo(repo, version)
@@ -899,22 +879,6 @@ def changelog_for_repo(repo, version)
     relevant = lines[current_version_index..previous_version_index]
 
     relevant.join("\n").strip
-  end
-end
-
-def github_access_token
-  require 'pathname'
-
-  Pathname('.github_access_token').expand_path.read.strip
-rescue
-  nil
-end
-
-def github_access_token_query
-  if token = github_access_token
-    "access_token=#{token}"
-  else
-    ''
   end
 end
 
